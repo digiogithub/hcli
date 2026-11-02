@@ -42,9 +42,9 @@ var locationRes = resource[hcloud.Location]{
 	Schema: func(l *hcloud.Location) any { return hcloud.SchemaFromLocation(l) },
 }
 
-// Datacenters are deprecated by Hetzner (changelog 2026-06-02) in favour of
-// locations; the commands are kept for parity with hcloud while the API
-// still answers.
+// Datacenters were deprecated by Hetzner (changelog 2026-06-02) and the list
+// endpoint now answers deprecated_api_endpoint, so there is no `datacenter`
+// command; this resource only backs the deprecated `server create --datacenter`.
 //
 //nolint:staticcheck // deprecated upstream, see above
 var datacenterRes = resource[hcloud.Datacenter]{
@@ -52,7 +52,6 @@ var datacenterRes = resource[hcloud.Datacenter]{
 	Get: func(ctx context.Context, cl *hcloud.Client, s string) (*hcloud.Datacenter, *hcloud.Response, error) {
 		return cl.Datacenter.Get(ctx, s)
 	},
-	Names:  datacenterNames,
 	Ident:  func(d *hcloud.Datacenter) (int64, string) { return d.ID, d.Name },
 	Schema: func(d *hcloud.Datacenter) any { return hcloud.SchemaFromDatacenter(d) },
 }
@@ -223,32 +222,6 @@ func newLocationCommand(a *app) *cobra.Command {
 				{"Latitude", fmt.Sprintf("%f", l.Latitude)},
 				{"Longitude", fmt.Sprintf("%f", l.Longitude)},
 			}
-		}),
-	)
-}
-
-//nolint:staticcheck // datacenters are deprecated upstream
-func newDatacenterCommand(a *app) *cobra.Command {
-	return group("datacenter", "List datacenters (deprecated upstream, use locations)", []string{"datacenters", "dc"},
-		newListCmd(a, datacenterRes, listSpec[hcloud.Datacenter]{
-			Headers: []string{"id", "name", "description", "location"},
-			All: func(ctx context.Context, cl *hcloud.Client, _ string, _ *cobra.Command) ([]*hcloud.Datacenter, error) {
-				return cl.Datacenter.All(ctx) //nolint:staticcheck // deprecated upstream
-			},
-			Row: func(d *hcloud.Datacenter) []any {
-				return []any{d.ID, d.Name, d.Description, locationName(d.Location)}
-			},
-		}),
-		newDescribeCmd(a, datacenterRes, func(d *hcloud.Datacenter) [][2]string {
-			kv := [][2]string{
-				{"ID", strconv.FormatInt(d.ID, 10)},
-				{"Name", d.Name},
-				{"Description", d.Description},
-			}
-			if l := d.Location; l != nil {
-				kv = append(kv, [2]string{"Location", fmt.Sprintf("%s (%s, %s)", l.Name, l.City, l.NetworkZone)})
-			}
-			return kv
 		}),
 	)
 }

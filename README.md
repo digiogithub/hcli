@@ -171,7 +171,7 @@ hcli cloud floating-ip assign <ip> web-01
 hcli cloud pricing
 ```
 
-Resources: `server` (list, describe, create, delete, poweron, poweroff, reboot, reset, shutdown, rebuild, change-type, enable-rescue, disable-rescue, create-image, ip, ssh, ...), `server-type`, `image`, `location`, `datacenter`, `iso`, `volume`, `network`, `firewall`, `floating-ip`, `primary-ip`, `load-balancer`, `ssh-key`, `certificate`, `placement-group` and `pricing`.
+Resources: `server` (list, describe, create, delete, poweron, poweroff, reboot, reset, shutdown, rebuild, change-type, enable-rescue, disable-rescue, create-image, ip, ssh, ...), `server-type`, `image`, `location`, `iso`, `volume`, `network`, `firewall`, `floating-ip`, `primary-ip`, `load-balancer`, `ssh-key`, `certificate`, `placement-group` and `pricing`.
 
 ### Hetzner Robot (dedicated servers)
 

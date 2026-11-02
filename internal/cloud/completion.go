@@ -118,12 +118,6 @@ func locationNames(ctx context.Context, cl *hcloud.Client) ([]string, error) {
 	return namesOf(items, func(l *hcloud.Location) (int64, string) { return l.ID, l.Name }), err
 }
 
-//nolint:staticcheck // datacenters are deprecated upstream
-func datacenterNames(ctx context.Context, cl *hcloud.Client) ([]string, error) {
-	items, err := cl.Datacenter.All(ctx) //nolint:staticcheck // deprecated upstream
-	return namesOf(items, func(d *hcloud.Datacenter) (int64, string) { return d.ID, d.Name }), err
-}
-
 func isoNames(ctx context.Context, cl *hcloud.Client) ([]string, error) {
 	items, err := cl.ISO.All(ctx)
 	return namesOf(items, func(i *hcloud.ISO) (int64, string) { return i.ID, i.Name }), err

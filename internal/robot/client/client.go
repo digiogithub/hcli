@@ -112,6 +112,8 @@ type APIError struct {
 	// Rate limit details (RATE_LIMIT_EXCEEDED).
 	MaxRequest int `json:"max_request,omitempty"`
 	Interval   int `json:"interval,omitempty"`
+	// Path is the request path (not part of the API answer).
+	Path string `json:"-"`
 }
 
 func (e *APIError) Error() string {
@@ -136,7 +138,11 @@ func (e *APIError) Error() string {
 		fmt.Fprintf(&b, " (limit %d requests per %ds)", e.MaxRequest, e.Interval)
 	}
 	if e.Status == http.StatusUnauthorized {
-		b.WriteString(" (check the webservice user/password; 3 failed logins block your IP for 10 minutes)")
+		if strings.HasPrefix(e.Path, "/order") {
+			b.WriteString(" (the order API must be enabled for this webservice user in Robot > Settings > Webservice and app settings)")
+		} else {
+			b.WriteString(" (check the webservice user/password; 3 failed logins block your IP for 10 minutes)")
+		}
 	}
 	return b.String()
 }
@@ -204,6 +210,7 @@ func (c *Client) Do(ctx context.Context, method, path string, values url.Values,
 			return decode(data, key, out)
 		}
 		apiErr := parseError(status, data)
+		apiErr.Path = path
 		if apiErr.IsRateLimit() && attempt < c.maxRetries {
 			delay := c.retryDelay << attempt
 			if ra := retryAfter(header.Get("Retry-After")); ra > 0 && ra < delay {

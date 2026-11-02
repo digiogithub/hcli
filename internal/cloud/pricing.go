@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 
 	"github.com/digiogithub/hcli/internal/output"
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
@@ -28,15 +29,15 @@ func newPricingCommand(a *app) *cobra.Command {
 			}
 			amount := func(pp hcloud.Price) string {
 				if net {
-					return pp.Net
+					return decimal(pp.Net, 4)
 				}
-				return pp.Gross
+				return decimal(pp.Gross, 4)
 			}
 			kind := "gross"
 			if net {
 				kind = "net"
 			}
-			fmt.Fprintf(p.Out, "Prices in %s, %s (VAT %s%%)\n\n", pr.Currency, kind, pr.VATRate)
+			fmt.Fprintf(p.Out, "Prices in %s, %s (VAT %s%%)\n\n", pr.Currency, kind, decimal(pr.VATRate, -1))
 			match := func(l string) bool { return location == "" || l == location }
 
 			servers := &output.Table{Headers: []string{"server type", "location", "hourly", "monthly", "included traffic", "per TB"}}
@@ -98,4 +99,14 @@ func newPricingCommand(a *app) *cobra.Command {
 	cmd.Flags().StringVar(&location, "location", "", "only show this location")
 	a.flagCompletion(cmd, "location", locationNames)
 	return cmd
+}
+
+// decimal reformats an API decimal string ("5.9900000000000000") with prec
+// digits (-1 = shortest exact form). Unparsable input is returned unchanged.
+func decimal(s string, prec int) string {
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return s
+	}
+	return strconv.FormatFloat(v, 'f', prec, 64)
 }

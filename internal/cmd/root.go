@@ -4,6 +4,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/digiogithub/hcli/internal/cli"
 	"github.com/digiogithub/hcli/internal/cloud"
@@ -67,6 +68,7 @@ HCLOUD_TOKEN, HROBOT_USER and HROBOT_PASSWORD.`,
 	root.AddCommand(cloudCmd, robotCmd, ctxCmd, compCmd, verCmd)
 	root.SetHelpCommandGroupID("config")
 	root.CompletionOptions.DisableDefaultCmd = true
+	rejectUnknownSubcommands(root)
 	return root
 }
 
@@ -91,4 +93,27 @@ func contextNames(c *cli.CLI) []string {
 		return nil
 	}
 	return cfg.Names()
+}
+
+// rejectUnknownSubcommands makes group commands (no Run of their own, like
+// `hcli robot reset`) fail on a mistyped sub-command instead of printing help
+// and exiting 0. Called without arguments they still show their help.
+func rejectUnknownSubcommands(cmd *cobra.Command) {
+	for _, sub := range cmd.Commands() {
+		rejectUnknownSubcommands(sub)
+	}
+	if cmd.Runnable() || !cmd.HasSubCommands() || cmd == cmd.Root() {
+		return
+	}
+	cmd.Args = func(c *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			return nil
+		}
+		msg := fmt.Sprintf("unknown command %q for %q", args[0], c.CommandPath())
+		if s := c.SuggestionsFor(args[0]); len(s) > 0 {
+			msg += "\n\nDid you mean this?\n\t" + strings.Join(s, "\n\t")
+		}
+		return fmt.Errorf("%s\nRun '%s --help' for usage", msg, c.CommandPath())
+	}
+	cmd.RunE = func(c *cobra.Command, _ []string) error { return c.Help() }
 }

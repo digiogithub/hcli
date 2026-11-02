@@ -309,7 +309,6 @@ func TestCommandTree(t *testing.T) {
 		"server-type":     {"list", "describe"},
 		"image":           {"list", "describe"},
 		"location":        {"list", "describe"},
-		"datacenter":      {"list", "describe"},
 		"iso":             {"list", "describe"},
 	}
 	for res, subs := range want {

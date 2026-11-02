@@ -267,7 +267,7 @@ func newServerCreateCmd(a *app) *cobra.Command {
 	a.flagCompletion(cmd, "type", serverTypeNames)
 	a.flagCompletion(cmd, "image", imageNames)
 	a.flagCompletion(cmd, "location", locationNames)
-	a.flagCompletion(cmd, "datacenter", datacenterNames)
+	_ = fl.MarkDeprecated("datacenter", "the datacenters API was removed by Hetzner; use --location")
 	a.flagCompletion(cmd, "ssh-key", sshKeyNames)
 	a.flagCompletion(cmd, "network", networkNames)
 	a.flagCompletion(cmd, "firewall", firewallNames)

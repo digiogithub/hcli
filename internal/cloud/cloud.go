@@ -56,7 +56,6 @@ or from HCLOUD_TOKEN. Resources are referenced by name or ID.`,
 	add("catalog",
 		newServerTypeCommand(a),
 		newLocationCommand(a),
-		newDatacenterCommand(a),
 		newPricingCommand(a),
 	)
 	return cmd
