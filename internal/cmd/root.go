@@ -75,7 +75,7 @@ func Execute() int {
 	c := cli.New()
 	root := NewRootCommand(c)
 	if err := root.Execute(); err != nil {
-		var exit *ExitError
+		var exit *cli.ExitError
 		if errors.As(err, &exit) {
 			return exit.Code
 		}
@@ -84,11 +84,6 @@ func Execute() int {
 	}
 	return 0
 }
-
-// ExitError lets a command choose the exit code.
-type ExitError struct{ Code int }
-
-func (e *ExitError) Error() string { return fmt.Sprintf("exit status %d", e.Code) }
 
 func contextNames(c *cli.CLI) []string {
 	cfg, err := c.Config()

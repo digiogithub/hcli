@@ -31,7 +31,7 @@ PowerShell:
 
 Completion is dynamic: resource names (servers, contexts, ...) are fetched
 from the API with the active context.`,
-		Args:                  cobra.ExactValidArgs(1),
+		Args:                  cobra.MatchAll(cobra.ExactArgs(1), cobra.OnlyValidArgs),
 		ValidArgs:             []string{"bash", "zsh", "fish", "powershell"},
 		DisableFlagsInUseLine: true,
 		RunE: func(cmd *cobra.Command, args []string) error {

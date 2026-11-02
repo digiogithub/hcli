@@ -1,0 +1,321 @@
+name: Release
+
+# Signed release pipeline (Digio scheme), triggered by pushing a version tag.
+#
+#   linux-windows : cross-compiles linux/{amd64,arm64} and windows/{amd64,arm64}
+#                   on ubuntu (pure Go, CGO_ENABLED=0). Linux archives go out as
+#                   dist-linux; the Windows zips as `unsigned-windows`, which the
+#                   release job never downloads.
+#   windows-sign  : Authenticode-signs hcli.exe on windows-latest with Azure
+#                   Artifact (Trusted) Signing over OIDC (environment `release`,
+#                   no secret), verifies the signature and re-zips -> dist-windows.
+#   macos         : builds darwin/{amd64,arm64}, signs with the Developer ID
+#                   (hardened runtime + timestamp) and notarizes (bare Mach-O:
+#                   submit-only, nothing to staple) -> dist-macos.
+#   release       : downloads dist-* only, writes SHA256SUMS and publishes the
+#                   GitHub release with notes since the previous tag
+#                   (prerelease when the tag carries a "-", e.g. v1.0.0-rc.1).
+#
+# Archives: hcli_<version>_<os>_<arch>.tar.gz (.zip for windows), each with the
+# binary, LICENSE, README.md and completions/hcli.{bash,zsh,fish,ps1}. Built by
+# scripts/release.sh. No UPX.
+#
+# One-off repository setup (Azure federated credentials, `release` environment,
+# AZURE_* variables, MACOS_SIGNING_BUNDLE secret): see AGENTS.md > Release.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to (re)build and release.'
+        required: true
+        type: string
+      draft:
+        description: 'Publish the release as a draft.'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  linux-windows:
+    name: Linux + Windows
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build and stage
+        # Completion scripts come from the linux/amd64 host binary.
+        env:
+          VERSION: ${{ env.RELEASE_TAG }}
+        run: scripts/release.sh stage linux/amd64 linux/arm64 windows/amd64 windows/arm64
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          bin="$(ls -d dist/stage/hcli_*_linux_amd64)/hcli"
+          "$bin" version
+          "$bin" --help >/dev/null
+
+      - name: Archive
+        run: scripts/release.sh archive && ls -la dist/
+
+      - name: Upload the Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-linux
+          path: dist/hcli_*_linux_*.tar.gz
+          if-no-files-found: error
+
+      - name: Upload the unsigned Windows artifacts
+        # Deliberately not named dist-* : the release job globs dist-* and must
+        # pick up the signed zips produced by windows-sign instead.
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-windows
+          path: dist/hcli_*_windows_*.zip
+          if-no-files-found: error
+
+  windows-sign:
+    name: Windows (Authenticode)
+    needs: linux-windows
+    runs-on: windows-latest
+    # The federated credentials on the shared Entra app are scoped to
+    # repo:digiogithub/hcli:environment:release, so the OIDC token minted for
+    # this job only validates from within that environment.
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download the unsigned Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: unsigned-windows
+          path: unsigned
+
+      - name: Unpack and collect the executables
+        # Each zip holds hcli_<v>_windows_<arch>/hcli.exe. The executables are
+        # copied into one flat folder under a unique name for signing, and put
+        # back afterwards.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path work, sign | Out-Null
+          Get-ChildItem unsigned/hcli_*_windows_*.zip | ForEach-Object {
+            Expand-Archive -Path $_.FullName -DestinationPath work -Force
+          }
+          Get-ChildItem -Directory work | ForEach-Object {
+            Copy-Item (Join-Path $_.FullName 'hcli.exe') (Join-Path sign ($_.Name + '.exe'))
+          }
+          Get-ChildItem sign
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign with Azure Artifact Signing
+        # No credential inputs: the action falls back to the Azure CLI session
+        # established above, which is the federated GitHub identity.
+        uses: azure/trusted-signing-action@v0
+        with:
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_CERT_PROFILE }}
+          files-folder: ${{ github.workspace }}\sign
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Verify the signatures
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exes = Get-ChildItem sign/*.exe
+          if ($exes.Count -eq 0) { Write-Output '::error::No executables to verify'; exit 1 }
+          $exes | ForEach-Object {
+            $sig = Get-AuthenticodeSignature $_.FullName
+            "-- $($_.Name): $($sig.Status) / $($sig.SignerCertificate.Subject)"
+            if ($sig.Status -ne 'Valid') {
+              Write-Output "::error::Unsigned or invalid: $($_.Name) ($($sig.Status))"
+              exit 1
+            }
+          }
+
+      - name: Repackage the signed zips
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Get-ChildItem -Directory work | ForEach-Object {
+            Copy-Item (Join-Path sign ($_.Name + '.exe')) (Join-Path $_.FullName 'hcli.exe') -Force
+            $sig = Get-AuthenticodeSignature (Join-Path $_.FullName 'hcli.exe')
+            if ($sig.Status -ne 'Valid') { Write-Output "::error::Lost signature: $($_.Name)"; exit 1 }
+            Compress-Archive -Path $_.FullName -DestinationPath ("dist/" + $_.Name + ".zip") -Force
+          }
+          Get-ChildItem dist
+
+      - name: Upload the signed Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-windows
+          path: dist/*.zip
+          if-no-files-found: error
+
+  macos:
+    name: macOS (signed + notarized)
+    runs-on: macos-latest
+    # Notarization submits each binary to Apple with --wait.
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build and stage
+        env:
+          VERSION: ${{ env.RELEASE_TAG }}
+        run: scripts/release.sh stage darwin/amd64 darwin/arm64
+
+      - name: Set up the signing keychain
+        # Exports SIGNING_IDENTITY, NOTARY_PROFILE and
+        # MACOS_SIGN_KEYCHAIN_PATH/PASSWORD for the steps below.
+        uses: digiogithub/ci-actions/macos-signing-keychain@v1
+        with:
+          signing-bundle: ${{ secrets.MACOS_SIGNING_BUNDLE }}
+          env-file: kvagerc
+          keychain-name: hcli-build
+          notary-profile: hcli-notary
+
+      - name: Codesign (Developer ID, hardened runtime, timestamp)
+        uses: digiogithub/ci-actions/macos-codesign@v1
+        with:
+          paths: dist/stage/hcli_*_darwin_*/hcli
+
+      - name: Prepare notarization uploads
+        # One uniquely named zip per signed binary (both binaries are called
+        # `hcli`; the zips only carry them to Apple and are not published).
+        run: |
+          set -euo pipefail
+          mkdir -p dist/notarize
+          for d in dist/stage/hcli_*_darwin_*; do
+            ditto -c -k "$d/hcli" "dist/notarize/$(basename "$d").zip"
+          done
+          ls -la dist/notarize
+
+      - name: Notarize
+        # Bare Mach-O inside a zip: submit-only (--wait), a ticket cannot be
+        # stapled to a plain binary, so Gatekeeper checks it online.
+        uses: digiogithub/ci-actions/macos-notarize@v1
+        with:
+          paths: dist/notarize/*.zip
+
+      - name: Verify signatures
+        run: |
+          set -euo pipefail
+          for f in dist/stage/hcli_*_darwin_*/hcli; do
+            echo "-- $f"
+            codesign --verify --strict --verbose=2 "$f"
+            codesign -dv "$f" 2>&1 | grep -E '^(Authority|TeamIdentifier|Timestamp|CodeDirectory)' || true
+          done
+
+      - name: Archive
+        run: scripts/release.sh archive && ls -la dist/
+
+      - name: Clean up the signing keychain
+        if: always()
+        uses: digiogithub/ci-actions/macos-keychain-cleanup@v1
+
+      - name: Upload the macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-macos
+          path: dist/hcli_*_darwin_*.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: [linux-windows, windows-sign, macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        # Full history: the notes are computed against the previous tag.
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          # dist-* only: skips unsigned-windows, replaced by dist-windows.
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+
+      - name: Check the artifact set
+        run: |
+          set -euo pipefail
+          ls -la dist/
+          n=$(find dist -maxdepth 1 -name 'hcli_*' \( -name '*.tar.gz' -o -name '*.zip' \) | wc -l)
+          [ "$n" -eq 6 ] || { echo "::error::Expected 6 archives, found $n"; exit 1; }
+
+      - name: Generate SHA256SUMS
+        run: scripts/release.sh sums
+
+      - name: Publish
+        # prerelease defaults to `auto`: tags with a "-" (v1.0.0-rc.1) are
+        # marked as pre-releases.
+        uses: digiogithub/ci-actions/github-release@v1
+        with:
+          tag: ${{ env.RELEASE_TAG }}
+          files: |
+            dist/hcli_*.tar.gz
+            dist/hcli_*.zip
+            dist/SHA256SUMS
+          draft: ${{ inputs.draft || false }}
+          notes-header: |
+            Downloads: `hcli_<version>_<os>_<arch>.tar.gz` for Linux and macOS
+            (macOS binaries signed with Developer ID and notarized), `.zip` for
+            Windows (Authenticode-signed). Each archive contains the binary,
+            LICENSE, README.md and shell completion scripts. `SHA256SUMS` lists
+            the SHA-256 of every archive.
+
+            Or: `go install github.com/digiogithub/hcli@${{ env.RELEASE_TAG }}`
+          token: ${{ github.token }}

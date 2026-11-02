@@ -33,8 +33,24 @@ type CLI struct {
 	Out io.Writer
 	Err io.Writer
 
-	cfg *config.Config
-	eff *config.Context
+	cfg   *config.Config
+	eff   *config.Context
+	inBuf *bufio.Reader
+}
+
+// ExitError makes hcli exit with Code without printing an error message
+// (e.g. to pass through the exit status of `ssh`).
+type ExitError struct{ Code int }
+
+func (e *ExitError) Error() string { return fmt.Sprintf("exit status %d", e.Code) }
+
+// reader returns a single buffered reader over In, so consecutive prompts do
+// not lose input buffered by a previous one.
+func (c *CLI) reader() *bufio.Reader {
+	if c.inBuf == nil {
+		c.inBuf = bufio.NewReader(c.In)
+	}
+	return c.inBuf
 }
 
 // New returns a CLI wired to the process stdio.
@@ -97,7 +113,7 @@ func (c *CLI) Confirm(action string) error {
 		return fmt.Errorf("refusing to %s without confirmation: pass --yes", action)
 	}
 	fmt.Fprintf(c.Err, "About to %s. Continue? [y/N]: ", action)
-	line, _ := bufio.NewReader(c.In).ReadString('\n')
+	line, _ := c.reader().ReadString('\n')
 	switch strings.ToLower(strings.TrimSpace(line)) {
 	case "y", "yes", "s", "si", "sí":
 		return nil
@@ -113,7 +129,7 @@ func (c *CLI) ReadSecret(prompt string) (string, error) {
 		fmt.Fprintln(c.Err)
 		return strings.TrimSpace(string(b)), err
 	}
-	line, err := bufio.NewReader(c.In).ReadString('\n')
+	line, err := c.reader().ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
 		return "", err
 	}

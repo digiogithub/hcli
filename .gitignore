@@ -4,3 +4,8 @@
 *.tmp
 coverage.out
 .env
+/completions/
+/bin/
+*.test
+*.out
+.DS_Store
