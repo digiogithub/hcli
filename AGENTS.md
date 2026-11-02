@@ -188,3 +188,11 @@ Its default mode is a dry run; `--apply` / `--secret` perform the writes and
 need a maintainer's explicit go-ahead. Agents never run the write mode, never
 read, print or decrypt the signing bundle, and never create new signing
 resources.
+
+Setup status: applied on 2026-11-02 (credentials `hcli-release-environment` and
+`hcli-release-environment-immutable`, environment `release`, six `AZURE_*`
+variables, secret `MACOS_SIGNING_BUNDLE`). First signed pre-release
+`v0.1.0-rc.1` (run 41531045391): both Windows `.exe` `Valid` /
+`CN=Digio Soluciones Digitales SL`; both darwin binaries signed with
+`Developer ID Application: DIGIO Soluciones Digitales S.L.N.E. (LRE923483J)`
+and notarization `Accepted` (bare Mach-O: submitted as zip, not stapled).
