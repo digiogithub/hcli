@@ -1,0 +1,6 @@
+/dist/
+/hcli
+/hcli.exe
+*.tmp
+coverage.out
+.env
