@@ -55,13 +55,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -83,7 +83,7 @@ jobs:
         run: scripts/release.sh archive && ls -la dist/
 
       - name: Upload the Linux artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dist-linux
           path: dist/hcli_*_linux_*.tar.gz
@@ -92,7 +92,7 @@ jobs:
       - name: Upload the unsigned Windows artifacts
         # Deliberately not named dist-* : the release job globs dist-* and must
         # pick up the signed zips produced by windows-sign instead.
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: unsigned-windows
           path: dist/hcli_*_windows_*.zip
@@ -111,7 +111,7 @@ jobs:
       id-token: write
     steps:
       - name: Download the unsigned Windows artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: unsigned-windows
           path: unsigned
@@ -133,7 +133,7 @@ jobs:
           Get-ChildItem sign
 
       - name: Azure login (OIDC)
-        uses: azure/login@v2
+        uses: azure/login@v3
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
@@ -142,7 +142,7 @@ jobs:
       - name: Sign with Azure Artifact Signing
         # No credential inputs: the action falls back to the Azure CLI session
         # established above, which is the federated GitHub identity.
-        uses: azure/trusted-signing-action@v0
+        uses: azure/trusted-signing-action@v2
         with:
           endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
           trusted-signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
@@ -182,7 +182,7 @@ jobs:
           Get-ChildItem dist
 
       - name: Upload the signed Windows artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dist-windows
           path: dist/*.zip
@@ -195,13 +195,13 @@ jobs:
     timeout-minutes: 120
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -261,7 +261,7 @@ jobs:
         uses: digiogithub/ci-actions/macos-keychain-cleanup@v1
 
       - name: Upload the macOS artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dist-macos
           path: dist/hcli_*_darwin_*.tar.gz
@@ -276,13 +276,13 @@ jobs:
     steps:
       - name: Checkout
         # Full history: the notes are computed against the previous tag.
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           # dist-* only: skips unsigned-windows, replaced by dist-windows.
           pattern: dist-*
